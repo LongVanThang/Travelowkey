@@ -1,0 +1,10 @@
+apiVersion: v2
+name: travelowkey
+version: 0.1.0
+description: Umbrella chart for Travelowkey platform
+
+# List service charts as dependencies
+# dependencies:
+#   - name: user-service
+#     version: 0.1.0
+#     repository: "file://../user-service"

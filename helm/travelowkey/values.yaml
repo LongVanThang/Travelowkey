@@ -1,0 +1,5 @@
+# Example values for umbrella chart
+user-service:
+  replicaCount: 1
+  image:
+    tag: latest

@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: user-service-prod
+  namespace: argocd
+spec:
+  project: travelowkey-prod
+  source:
+    repoURL: 'https://github.com/your-org/travelowkey'
+    targetRevision: HEAD
+    path: helm/user-service
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-production.yaml
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: travelowkey-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
