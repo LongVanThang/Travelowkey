@@ -295,6 +295,17 @@ frontend/
 - Centralized logging via ELK stack (Elasticsearch, Logstash, Kibana)
 - K8s probes: /health, /ready, /metrics endpoints
 
+## Phase 8: CI/CD & GitOps (Week 11)
+
+**Goal:** Automate build, test, and deployment using GitOps.
+
+**Tasks:**
+- Multi-stage Dockerfiles for all services
+- Helm charts for Kubernetes deployment
+- GitHub Actions pipeline: Lint → Test → Build → Push → Deploy
+- ArgoCD for GitOps-based deployment
+- Split staging vs production environments
+
 ## ✅ Security Hardening Checklist (Phase 6)
 
 Use this checklist to ensure all backend services meet enterprise-grade security standards:
