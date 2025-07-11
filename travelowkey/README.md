@@ -342,11 +342,11 @@ kubectl apply -f services/auth-service/k8s/ -n travelowkey
 
 ## 📊 Service Templates
 
-### Node.js Service Template
+### Node.js Service Template (with Security Hardening)
 Each Node.js service follows this structure:
 
 ```javascript
-// package.json template
+// package.json dependencies (add these for security)
 {
   "name": "@travelowkey/service-name",
   "version": "1.0.0",
@@ -354,8 +354,9 @@ Each Node.js service follows this structure:
     "express": "^4.18.0",
     "helmet": "^7.0.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.0.0",
-    "pg": "^8.8.0",
+    "express-jwt": "^7.7.8",
+    "jsonwebtoken": "^9.0.0",
+    "express-rate-limit": "^7.0.0",
     "redis": "^4.5.0",
     "kafkajs": "^2.2.0",
     "joi": "^17.7.0",
@@ -364,21 +365,48 @@ Each Node.js service follows this structure:
   }
 }
 
-// Basic Express app structure
+// Basic Express app structure with security
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const jwt = require('express-jwt');
+const rateLimit = require('express-rate-limit');
+const RedisStore = require('rate-limit-redis');
+const redis = require('redis');
 const routes = require('./routes');
 const middleware = require('./middleware');
 
 const app = express();
 
-// Security & middleware
+// Security HTTP headers
 app.use(helmet());
+// CORS
 app.use(cors());
+// JSON body parsing
 app.use(express.json());
-app.use(middleware.auth);
-app.use(middleware.logging);
+
+// JWT validation middleware (adjust secret and algorithms)
+app.use(jwt({ secret: process.env.JWT_SECRET, algorithms: ['HS256'] }).unless({ path: ['/auth/login', '/auth/register', '/health'] }));
+
+// Rate limiting (with Redis)
+const redisClient = redis.createClient({ url: process.env.REDIS_URL });
+app.use(rateLimit({
+  store: new RedisStore({ sendCommand: (...args) => redisClient.sendCommand(args) }),
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP
+}));
+
+// RBAC middleware example
+app.use((req, res, next) => {
+  // Example: check user role from JWT
+  if (req.user && req.user.role === 'admin') {
+    return next();
+  }
+  // Allow public routes
+  if (['/health', '/public'].includes(req.path)) return next();
+  // Otherwise, forbid
+  return res.status(403).json({ error: 'Forbidden' });
+});
 
 // Routes
 app.use('/api/v1', routes);
@@ -389,9 +417,14 @@ app.get('/health', (req, res) => {
 });
 
 module.exports = app;
+
+// Notes:
+// - mTLS is handled at the infrastructure level (e.g., Istio in Kubernetes)
+// - Use input validation libraries (e.g., Joi) to prevent XSS/SQLi
+// - Use parameterized queries/ORM for DB access
 ```
 
-### Spring Boot Service Template
+### Spring Boot Service Template (with Security Hardening)
 ```java
 // Main application class
 @SpringBootApplication
@@ -403,25 +436,43 @@ public class ServiceApplication {
     }
 }
 
-// Controller template
-@RestController
-@RequestMapping("/api/v1/entity")
-@Validated
-public class EntityController {
-    
-    @Autowired
-    private EntityService entityService;
-    
-    @GetMapping
-    public ResponseEntity<List<EntityDto>> getAll() {
-        return ResponseEntity.ok(entityService.findAll());
-    }
-    
-    @PostMapping
-    public ResponseEntity<EntityDto> create(@Valid @RequestBody CreateEntityRequest request) {
-        return ResponseEntity.status(CREATED).body(entityService.create(request));
+// SecurityConfig.java
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http
+            .csrf().and() // CSRF protection enabled by default
+            .authorizeRequests()
+                .antMatchers("/auth/**", "/health").permitAll()
+                .antMatchers("/admin/**").hasRole("ADMIN") // RBAC example
+                .anyRequest().authenticated()
+            .and()
+            .oauth2ResourceServer().jwt(); // JWT validation
     }
 }
+
+// Rate limiting with Bucket4j (example)
+@RestController
+public class SomeController {
+    private final Bucket bucket = Bucket4j.builder()
+        .addLimit(Bandwidth.classic(100, Refill.greedy(100, Duration.ofMinutes(15))))
+        .build();
+
+    @GetMapping("/api/v1/resource")
+    public ResponseEntity<?> getResource() {
+        if (bucket.tryConsume(1)) {
+            return ResponseEntity.ok("Resource data");
+        } else {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+        }
+    }
+}
+
+// Notes:
+// - mTLS is handled at the infrastructure level (e.g., Istio in Kubernetes)
+// - Use @Valid and input validation annotations to prevent XSS/SQLi
+// - Use JPA/parameterized queries for DB access
 ```
 
 ## 🔧 Development Guidelines
