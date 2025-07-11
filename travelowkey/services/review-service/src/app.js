@@ -28,3 +28,29 @@ function rbac(roles = []) {
 //     next();
 //   };
 // }
+
+// --- Observability & Monitoring Enhancements (Phase 7) ---
+// Prometheus metrics
+const promClient = require('prom-client');
+const collectDefaultMetrics = promClient.collectDefaultMetrics;
+collectDefaultMetrics();
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', promClient.register.contentType);
+  res.end(await promClient.register.metrics());
+});
+
+// Jaeger tracing (example, requires jaeger-client and opentracing)
+// const initTracer = require('jaeger-client').initTracer;
+// const opentracing = require('opentracing');
+// const tracer = initTracer({ serviceName: 'review-service', reporter: { logSpans: true } }, {});
+// opentracing.initGlobalTracer(tracer);
+// Add span creation in routes as needed
+
+// Centralized logging: Winston logs can be shipped to ELK stack (see logger.js)
+// Grafana dashboards: Use Prometheus metrics for dashboard panels
+
+// K8s probes: /health (already present), /ready (add below)
+app.get('/ready', (req, res) => {
+  // Add readiness checks as needed (e.g., DB, Redis, Kafka)
+  res.json({ status: 'ready', timestamp: new Date() });
+});
