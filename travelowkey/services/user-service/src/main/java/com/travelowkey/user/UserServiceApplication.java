@@ -26,3 +26,15 @@ public class UserServiceApplication {
         SpringApplication.run(UserServiceApplication.class, args);
     }
 }
+
+// Placeholder for controller package
+package com.travelowkey.user.controller;
+
+// Placeholder for service package
+package com.travelowkey.user.service;
+
+// Placeholder for dto package
+package com.travelowkey.user.dto;
+
+// Placeholder for repository package
+package com.travelowkey.user.repository;
