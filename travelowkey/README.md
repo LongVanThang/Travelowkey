@@ -272,6 +272,18 @@ frontend/
 - Admin dashboard
 - SEO optimization
 
+## Phase 6: Security Hardening (Week 9)
+
+**Goal:** Implement enterprise-grade security across all services.
+
+**Tasks:**
+- Enable JWT validation in each backend service
+- Use mTLS between services (e.g., with Istio)
+- Enable CSRF, XSS, and SQLi protection
+    - Spring Security (for Java), Helmet.js (for Node.js)
+- Role-Based Access Control (RBAC)
+- Rate limiting via Redis or Bucket4j
+
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
