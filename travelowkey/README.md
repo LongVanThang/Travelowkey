@@ -284,6 +284,45 @@ frontend/
 - Role-Based Access Control (RBAC)
 - Rate limiting via Redis or Bucket4j
 
+## ✅ Security Hardening Checklist (Phase 6)
+
+Use this checklist to ensure all backend services meet enterprise-grade security standards:
+
+### 1. JWT Validation
+- [ ] Ensure all endpoints (except public/auth) require JWT authentication.
+- [ ] Validate JWT signature and claims in every service.
+- [ ] Use strong, rotated secrets/keys for signing JWTs.
+
+### 2. mTLS Between Services
+- [ ] Deploy Istio (or similar) in Kubernetes cluster.
+- [ ] Enable strict mTLS mode for all namespaces/services.
+- [ ] Verify all inter-service traffic is encrypted and authenticated.
+
+### 3. CSRF, XSS, and SQLi Protection
+- [ ] Enable CSRF protection (Spring Security for Java, custom middleware for Node.js if needed).
+- [ ] Use Helmet.js in all Node.js services for secure HTTP headers.
+- [ ] Validate and sanitize all user input (Joi for Node.js, @Valid for Java).
+- [ ] Use parameterized queries or ORM for all database access.
+
+### 4. Role-Based Access Control (RBAC)
+- [ ] Define user roles and permissions for each service.
+- [ ] Enforce RBAC in route/method handlers (Spring Security annotations, Node.js middleware).
+- [ ] Test access restrictions for all roles.
+
+### 5. Rate Limiting
+- [ ] Implement rate limiting in every service (express-rate-limit/Redis for Node.js, Bucket4j/Redis for Java).
+- [ ] Set appropriate limits for each endpoint.
+- [ ] Monitor and log rate limit violations.
+
+### 6. General
+- [ ] Review and update dependencies for security patches.
+- [ ] Run automated security scans (e.g., Snyk, OWASP Dependency-Check).
+- [ ] Document all security configurations and policies.
+
+---
+
+**Tip:** Use the updated service templates above as a reference for implementation in each service.
+
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
