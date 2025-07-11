@@ -284,6 +284,17 @@ frontend/
 - Role-Based Access Control (RBAC)
 - Rate limiting via Redis or Bucket4j
 
+## Phase 7: Observability & Monitoring (Week 10)
+
+**Goal:** Real-time service monitoring and tracing.
+
+**Tasks:**
+- Prometheus metrics exporters in all services
+- Grafana dashboards per domain
+- Jaeger distributed tracing
+- Centralized logging via ELK stack (Elasticsearch, Logstash, Kibana)
+- K8s probes: /health, /ready, /metrics endpoints
+
 ## ✅ Security Hardening Checklist (Phase 6)
 
 Use this checklist to ensure all backend services meet enterprise-grade security standards:
