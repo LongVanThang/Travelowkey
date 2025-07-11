@@ -1,11 +1,11 @@
-// app.js - Minimal Express app setup for analytics-service
+// app.js - Minimal Express app setup for payment-service
 
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
 const compression = require('compression');
-const analyticsRoutes = require('./routes/analyticsRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 const app = express();
 
@@ -15,18 +15,18 @@ app.use(compression());
 app.use(express.json());
 app.use(morgan('dev'));
 
-// Mount analytics routes
-app.use('/api/v1/analytics', analyticsRoutes);
+// Mount payment routes
+app.use('/api/v1/payments', paymentRoutes);
 
 // Default route
 app.get('/', (req, res) => {
   res.json({
-    service: 'Analytics Service',
+    service: 'Payment Service',
     version: '1.0.0',
     status: 'running',
     timestamp: new Date().toISOString(),
     endpoints: {
-      analytics: '/api/v1/analytics'
+      payments: '/api/v1/payments'
     }
   });
 });
