@@ -22,6 +22,21 @@ import java.util.Collections;
 @EnableWebFluxSecurity
 public class SecurityConfig {
 
+    /**
+     * --- Security Hardening Enhancements (Phase 6) ---
+     * - mTLS is enforced at the infrastructure level (e.g., Istio in Kubernetes)
+     * - JWT validation is handled by a custom filter (ensure all protected endpoints require JWT)
+     * - RBAC: Use .hasRole() or .hasAuthority() for sensitive endpoints
+     * - Rate limiting: Integrate Bucket4j or Redis-based rate limiting as a WebFilter
+     */
+
+    // Example RBAC (add to authorizeExchange):
+    // .pathMatchers("/api/v1/admin/**").hasRole("ADMIN")
+    // .pathMatchers("/api/v1/user/**").hasAnyRole("USER", "ADMIN")
+
+    // Example rate limiting (pseudo-code):
+    // http.addFilterBefore(new RateLimitingWebFilter(), SecurityWebFiltersOrder.AUTHORIZATION);
+
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         return http

@@ -272,6 +272,79 @@ frontend/
 - Admin dashboard
 - SEO optimization
 
+## Phase 6: Security Hardening (Week 9)
+
+**Goal:** Implement enterprise-grade security across all services.
+
+**Tasks:**
+- Enable JWT validation in each backend service
+- Use mTLS between services (e.g., with Istio)
+- Enable CSRF, XSS, and SQLi protection
+    - Spring Security (for Java), Helmet.js (for Node.js)
+- Role-Based Access Control (RBAC)
+- Rate limiting via Redis or Bucket4j
+
+## Phase 7: Observability & Monitoring (Week 10)
+
+**Goal:** Real-time service monitoring and tracing.
+
+**Tasks:**
+- Prometheus metrics exporters in all services
+- Grafana dashboards per domain
+- Jaeger distributed tracing
+- Centralized logging via ELK stack (Elasticsearch, Logstash, Kibana)
+- K8s probes: /health, /ready, /metrics endpoints
+
+## Phase 8: CI/CD & GitOps (Week 11)
+
+**Goal:** Automate build, test, and deployment using GitOps.
+
+**Tasks:**
+- Multi-stage Dockerfiles for all services
+- Helm charts for Kubernetes deployment
+- GitHub Actions pipeline: Lint → Test → Build → Push → Deploy
+- ArgoCD for GitOps-based deployment
+- Split staging vs production environments
+
+## ✅ Security Hardening Checklist (Phase 6)
+
+Use this checklist to ensure all backend services meet enterprise-grade security standards:
+
+### 1. JWT Validation
+- [ ] Ensure all endpoints (except public/auth) require JWT authentication.
+- [ ] Validate JWT signature and claims in every service.
+- [ ] Use strong, rotated secrets/keys for signing JWTs.
+
+### 2. mTLS Between Services
+- [ ] Deploy Istio (or similar) in Kubernetes cluster.
+- [ ] Enable strict mTLS mode for all namespaces/services.
+- [ ] Verify all inter-service traffic is encrypted and authenticated.
+
+### 3. CSRF, XSS, and SQLi Protection
+- [ ] Enable CSRF protection (Spring Security for Java, custom middleware for Node.js if needed).
+- [ ] Use Helmet.js in all Node.js services for secure HTTP headers.
+- [ ] Validate and sanitize all user input (Joi for Node.js, @Valid for Java).
+- [ ] Use parameterized queries or ORM for all database access.
+
+### 4. Role-Based Access Control (RBAC)
+- [ ] Define user roles and permissions for each service.
+- [ ] Enforce RBAC in route/method handlers (Spring Security annotations, Node.js middleware).
+- [ ] Test access restrictions for all roles.
+
+### 5. Rate Limiting
+- [ ] Implement rate limiting in every service (express-rate-limit/Redis for Node.js, Bucket4j/Redis for Java).
+- [ ] Set appropriate limits for each endpoint.
+- [ ] Monitor and log rate limit violations.
+
+### 6. General
+- [ ] Review and update dependencies for security patches.
+- [ ] Run automated security scans (e.g., Snyk, OWASP Dependency-Check).
+- [ ] Document all security configurations and policies.
+
+---
+
+**Tip:** Use the updated service templates above as a reference for implementation in each service.
+
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
@@ -330,11 +403,11 @@ kubectl apply -f services/auth-service/k8s/ -n travelowkey
 
 ## 📊 Service Templates
 
-### Node.js Service Template
+### Node.js Service Template (with Security Hardening)
 Each Node.js service follows this structure:
 
 ```javascript
-// package.json template
+// package.json dependencies (add these for security)
 {
   "name": "@travelowkey/service-name",
   "version": "1.0.0",
@@ -342,8 +415,9 @@ Each Node.js service follows this structure:
     "express": "^4.18.0",
     "helmet": "^7.0.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.0.0",
-    "pg": "^8.8.0",
+    "express-jwt": "^7.7.8",
+    "jsonwebtoken": "^9.0.0",
+    "express-rate-limit": "^7.0.0",
     "redis": "^4.5.0",
     "kafkajs": "^2.2.0",
     "joi": "^17.7.0",
@@ -352,21 +426,48 @@ Each Node.js service follows this structure:
   }
 }
 
-// Basic Express app structure
+// Basic Express app structure with security
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const jwt = require('express-jwt');
+const rateLimit = require('express-rate-limit');
+const RedisStore = require('rate-limit-redis');
+const redis = require('redis');
 const routes = require('./routes');
 const middleware = require('./middleware');
 
 const app = express();
 
-// Security & middleware
+// Security HTTP headers
 app.use(helmet());
+// CORS
 app.use(cors());
+// JSON body parsing
 app.use(express.json());
-app.use(middleware.auth);
-app.use(middleware.logging);
+
+// JWT validation middleware (adjust secret and algorithms)
+app.use(jwt({ secret: process.env.JWT_SECRET, algorithms: ['HS256'] }).unless({ path: ['/auth/login', '/auth/register', '/health'] }));
+
+// Rate limiting (with Redis)
+const redisClient = redis.createClient({ url: process.env.REDIS_URL });
+app.use(rateLimit({
+  store: new RedisStore({ sendCommand: (...args) => redisClient.sendCommand(args) }),
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP
+}));
+
+// RBAC middleware example
+app.use((req, res, next) => {
+  // Example: check user role from JWT
+  if (req.user && req.user.role === 'admin') {
+    return next();
+  }
+  // Allow public routes
+  if (['/health', '/public'].includes(req.path)) return next();
+  // Otherwise, forbid
+  return res.status(403).json({ error: 'Forbidden' });
+});
 
 // Routes
 app.use('/api/v1', routes);
@@ -377,9 +478,14 @@ app.get('/health', (req, res) => {
 });
 
 module.exports = app;
+
+// Notes:
+// - mTLS is handled at the infrastructure level (e.g., Istio in Kubernetes)
+// - Use input validation libraries (e.g., Joi) to prevent XSS/SQLi
+// - Use parameterized queries/ORM for DB access
 ```
 
-### Spring Boot Service Template
+### Spring Boot Service Template (with Security Hardening)
 ```java
 // Main application class
 @SpringBootApplication
@@ -391,25 +497,43 @@ public class ServiceApplication {
     }
 }
 
-// Controller template
-@RestController
-@RequestMapping("/api/v1/entity")
-@Validated
-public class EntityController {
-    
-    @Autowired
-    private EntityService entityService;
-    
-    @GetMapping
-    public ResponseEntity<List<EntityDto>> getAll() {
-        return ResponseEntity.ok(entityService.findAll());
-    }
-    
-    @PostMapping
-    public ResponseEntity<EntityDto> create(@Valid @RequestBody CreateEntityRequest request) {
-        return ResponseEntity.status(CREATED).body(entityService.create(request));
+// SecurityConfig.java
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http
+            .csrf().and() // CSRF protection enabled by default
+            .authorizeRequests()
+                .antMatchers("/auth/**", "/health").permitAll()
+                .antMatchers("/admin/**").hasRole("ADMIN") // RBAC example
+                .anyRequest().authenticated()
+            .and()
+            .oauth2ResourceServer().jwt(); // JWT validation
     }
 }
+
+// Rate limiting with Bucket4j (example)
+@RestController
+public class SomeController {
+    private final Bucket bucket = Bucket4j.builder()
+        .addLimit(Bandwidth.classic(100, Refill.greedy(100, Duration.ofMinutes(15))))
+        .build();
+
+    @GetMapping("/api/v1/resource")
+    public ResponseEntity<?> getResource() {
+        if (bucket.tryConsume(1)) {
+            return ResponseEntity.ok("Resource data");
+        } else {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+        }
+    }
+}
+
+// Notes:
+// - mTLS is handled at the infrastructure level (e.g., Istio in Kubernetes)
+// - Use @Valid and input validation annotations to prevent XSS/SQLi
+// - Use JPA/parameterized queries for DB access
 ```
 
 ## 🔧 Development Guidelines

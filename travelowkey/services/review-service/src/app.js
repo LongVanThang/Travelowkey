@@ -1,19 +1,3 @@
-// app.js - Minimal Express app setup for notification-service
-
-const express = require('express');
-const helmet = require('helmet');
-const cors = require('cors');
-const morgan = require('morgan');
-const compression = require('compression');
-const notificationRoutes = require('./routes/notificationRoutes');
-
-const app = express();
-
-app.use(helmet());
-app.use(cors());
-app.use(compression());
-app.use(express.json());
-app.use(morgan('dev'));
 
 // --- Security Hardening Enhancements (Phase 6) ---
 // NOTE: mTLS is enforced at the infrastructure level (e.g., Istio in Kubernetes)
@@ -45,22 +29,6 @@ function rbac(roles = []) {
 //   };
 // }
 
-// Mount notification routes
-app.use('/api/v1/notifications', notificationRoutes);
-
-// Default route
-app.get('/', (req, res) => {
-  res.json({
-    service: 'Notification Service',
-    version: '1.0.0',
-    status: 'running',
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      notifications: '/api/v1/notifications'
-    }
-  });
-});
-
 // --- Observability & Monitoring Enhancements (Phase 7) ---
 // Prometheus metrics
 const promClient = require('prom-client');
@@ -74,7 +42,7 @@ app.get('/metrics', async (req, res) => {
 // Jaeger tracing (example, requires jaeger-client and opentracing)
 // const initTracer = require('jaeger-client').initTracer;
 // const opentracing = require('opentracing');
-// const tracer = initTracer({ serviceName: 'notification-service', reporter: { logSpans: true } }, {});
+// const tracer = initTracer({ serviceName: 'review-service', reporter: { logSpans: true } }, {});
 // opentracing.initGlobalTracer(tracer);
 // Add span creation in routes as needed
 
@@ -86,5 +54,3 @@ app.get('/ready', (req, res) => {
   // Add readiness checks as needed (e.g., DB, Redis, Kafka)
   res.json({ status: 'ready', timestamp: new Date() });
 });
-
-module.exports = app;
