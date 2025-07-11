@@ -1,0 +1,373 @@
+version: '3.8'
+
+services:
+  # =============================================
+  # DATABASES
+  # =============================================
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: travelowkey-postgres
+    environment:
+      POSTGRES_DB: travelowkey
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      POSTGRES_MULTIPLE_DATABASES: auth_db,user_db,booking_db,payment_db,review_db,admin_db,cms_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh
+    networks:
+      - travelowkey-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U travelowkey"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: travelowkey-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - travelowkey-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: travelowkey-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - travelowkey-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.10
+    container_name: travelowkey-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    networks:
+      - travelowkey-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # =============================================
+  # MESSAGE BROKER
+  # =============================================
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: travelowkey-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - travelowkey-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: travelowkey-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    networks:
+      - travelowkey-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: travelowkey-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - travelowkey-network
+
+  # =============================================
+  # MONITORING STACK
+  # =============================================
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: travelowkey-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - travelowkey-network
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: travelowkey-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - travelowkey-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.51
+    container_name: travelowkey-jaeger
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - travelowkey-network
+
+  # =============================================
+  # ELK STACK
+  # =============================================
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: travelowkey-logstash
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5044:5044"
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "9600:9600"
+    volumes:
+      - ./monitoring/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./monitoring/logstash/pipeline:/usr/share/logstash/pipeline
+    environment:
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    networks:
+      - travelowkey-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: travelowkey-kibana
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+    networks:
+      - travelowkey-network
+
+  # =============================================
+  # LOAD BALANCER
+  # =============================================
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: travelowkey-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    networks:
+      - travelowkey-network
+    depends_on:
+      - api-gateway
+
+  # =============================================
+  # APPLICATION SERVICES
+  # =============================================
+
+  api-gateway:
+    build:
+      context: ../services/api-gateway
+      dockerfile: Dockerfile
+    container_name: travelowkey-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - REDIS_HOST=redis
+      - JWT_SECRET=travelowkey-super-secret-jwt-key-production
+    depends_on:
+      - redis
+      - postgres
+      - kafka
+    networks:
+      - travelowkey-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  auth-service:
+    build:
+      context: ../services/auth-service
+      dockerfile: Dockerfile
+    container_name: travelowkey-auth-service
+    ports:
+      - "3001:3001"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DATABASE_URL=jdbc:postgresql://postgres:5432/auth_db
+      - DATABASE_USERNAME=travelowkey
+      - DATABASE_PASSWORD=travelowkey123
+      - REDIS_HOST=redis
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - JWT_SECRET=travelowkey-super-secret-jwt-key-production
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    networks:
+      - travelowkey-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Add other services as they are implemented
+  # user-service:
+  #   build:
+  #     context: ../services/user-service
+  #   container_name: travelowkey-user-service
+  #   ports:
+  #     - "3002:3002"
+  #   environment:
+  #     - SPRING_PROFILES_ACTIVE=docker
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #     - kafka
+  #   networks:
+  #     - travelowkey-network
+
+  # flight-service:
+  #   build:
+  #     context: ../services/flight-service
+  #   container_name: travelowkey-flight-service
+  #   ports:
+  #     - "3003:3003"
+  #   environment:
+  #     - NODE_ENV=production
+  #     - DATABASE_URL=postgresql://travelowkey:travelowkey123@postgres:5432/flight_db
+  #     - REDIS_URL=redis://redis:6379
+  #     - KAFKA_BROKERS=kafka:29092
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #     - kafka
+  #   networks:
+  #     - travelowkey-network
+
+  # =============================================
+  # EXTERNAL SERVICES (for development)
+  # =============================================
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: travelowkey-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - travelowkey-network
+
+  minio:
+    image: minio/minio:RELEASE.2023-11-20T22-40-07Z
+    container_name: travelowkey-minio
+    ports:
+      - "9001:9001"
+      - "9002:9002"
+    environment:
+      MINIO_ROOT_USER: travelowkey
+      MINIO_ROOT_PASSWORD: travelowkey123
+    command: server /data --console-address ":9001" --address ":9002"
+    volumes:
+      - minio_data:/data
+    networks:
+      - travelowkey-network
+
+  # =============================================
+  # VOLUMES
+  # =============================================
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  clickhouse_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  travelowkey-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
