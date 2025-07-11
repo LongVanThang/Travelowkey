@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: content-management-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: content-management-service
+  template:
+    metadata:
+      labels:
+        app: content-management-service
+    spec:
+      containers:
+      - name: content-management-service
+        image: content-management-service:latest
+        ports:
+        - containerPort: 3000

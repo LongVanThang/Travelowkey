@@ -1,0 +1,4 @@
+apiVersion: v2
+name: user-service
+version: 0.1.0
+description: User Service Helm chart for Kubernetes

@@ -1,12 +1,33 @@
-export default function BookingsPage() {
+import { adminApi } from '@/src/utils/api';
+import { useEffect, useState } from 'react';
+import AdminDashboard from '@/src/components/admin/AdminDashboard';
+import AnalyticsDashboard from '@/src/components/admin/AnalyticsDashboard';
+
+export default function AdminPage() {
+  const [dashboard, setDashboard] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      adminApi.getDashboard(),
+      adminApi.getAnalytics()
+    ]).then(([dashboardRes, analyticsRes]) => {
+      setDashboard(dashboardRes.data);
+      setAnalytics(analyticsRes.data);
+      setLoading(false);
+    });
+  }, []);
+
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-3xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">My Bookings</h1>
-        <div className="bg-white rounded-lg shadow p-6">
-          <p className="text-gray-600">You have no bookings yet.</p>
-        </div>
-      </div>
+    <div className="max-w-5xl mx-auto p-8">
+      <h1 className="text-2xl font-bold mb-4">Admin Panel</h1>
+      {loading ? <div>Loading...</div> : (
+        <>
+          <AdminDashboard data={dashboard} />
+          <AnalyticsDashboard data={analytics} />
+        </>
+      )}
     </div>
   );
 }
