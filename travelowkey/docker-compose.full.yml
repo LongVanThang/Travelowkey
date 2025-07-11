@@ -1,0 +1,640 @@
+version: '3.8'
+
+services:
+  # Infrastructure Services
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: zookeeper
+    container_name: travelowkey-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    hostname: kafka
+    container_name: travelowkey-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9997:9997"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      KAFKA_CONFLUENT_METRICS_ENABLE: 'true'
+      KAFKA_CONFLUENT_SUPPORT_CUSTOMER_ID: anonymous
+      KAFKA_JMX_PORT: 9997
+      KAFKA_JMX_HOSTNAME: localhost
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  redis:
+    image: redis:7.2-alpine
+    hostname: redis
+    container_name: travelowkey-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --replica-read-only no
+    volumes:
+      - redis-data:/data
+
+  postgres:
+    image: postgres:15.4-alpine
+    hostname: postgres
+    container_name: travelowkey-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: travelowkey
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      POSTGRES_MULTIPLE_DATABASES: auth,users,flights,hotels,cars,bookings,payments,reviews,notifications,analytics,loyalty,insurance,content
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
+
+  mongodb:
+    image: mongo:7.0
+    hostname: mongodb
+    container_name: travelowkey-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: travelowkey
+      MONGO_INITDB_ROOT_PASSWORD: travelowkey123
+      MONGO_INITDB_DATABASE: travelowkey
+    volumes:
+      - mongodb-data:/data/db
+      - ./infrastructure/mongodb/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    hostname: elasticsearch
+    container_name: travelowkey-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    hostname: kibana
+    container_name: travelowkey-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+
+  prometheus:
+    image: prom/prometheus:v2.47.2
+    hostname: prometheus
+    container_name: travelowkey-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    hostname: grafana
+    container_name: travelowkey-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+
+  # Phase 1 Services - Core Infrastructure
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    hostname: api-gateway
+    container_name: travelowkey-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth
+      SPRING_DATASOURCE_USERNAME: travelowkey
+      SPRING_DATASOURCE_PASSWORD: travelowkey123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    hostname: auth-service
+    container_name: travelowkey-auth-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth
+      SPRING_DATASOURCE_USERNAME: travelowkey
+      SPRING_DATASOURCE_PASSWORD: travelowkey123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JWT_SECRET: travelowkey-jwt-secret-key-2024
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET}
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    hostname: user-service
+    container_name: travelowkey-user-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/users
+      SPRING_DATASOURCE_USERNAME: travelowkey
+      SPRING_DATASOURCE_PASSWORD: travelowkey123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  flight-service:
+    build:
+      context: ./services/flight-service
+      dockerfile: Dockerfile
+    hostname: flight-service
+    container_name: travelowkey-flight-service
+    ports:
+      - "3003:3003"
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: flights
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      AMADEUS_API_KEY: ${AMADEUS_API_KEY}
+      AMADEUS_API_SECRET: ${AMADEUS_API_SECRET}
+      SABRE_API_KEY: ${SABRE_API_KEY}
+      SABRE_API_SECRET: ${SABRE_API_SECRET}
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - elasticsearch
+    restart: unless-stopped
+
+  # Phase 2 Services - Extended Booking
+  hotel-service:
+    build:
+      context: ./services/hotel-service
+      dockerfile: Dockerfile
+    hostname: hotel-service
+    container_name: travelowkey-hotel-service
+    ports:
+      - "3004:3004"
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: hotels
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      BOOKING_COM_API_KEY: ${BOOKING_COM_API_KEY}
+      EXPEDIA_API_KEY: ${EXPEDIA_API_KEY}
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - elasticsearch
+    restart: unless-stopped
+
+  car-rental-service:
+    build:
+      context: ./services/car-rental-service
+      dockerfile: Dockerfile
+    hostname: car-rental-service
+    container_name: travelowkey-car-rental-service
+    ports:
+      - "3005:3005"
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: cars
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/cars?authSource=admin
+    depends_on:
+      - postgres
+      - mongodb
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  booking-service:
+    build:
+      context: ./services/booking-service
+      dockerfile: Dockerfile
+    hostname: booking-service
+    container_name: travelowkey-booking-service
+    ports:
+      - "3006:3006"
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: bookings
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      FLIGHT_SERVICE_URL: http://flight-service:3003
+      HOTEL_SERVICE_URL: http://hotel-service:3004
+      CAR_SERVICE_URL: http://car-rental-service:3005
+      PAYMENT_SERVICE_URL: http://payment-service:3007
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - flight-service
+      - hotel-service
+      - car-rental-service
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ./services/payment-service
+      dockerfile: Dockerfile
+    hostname: payment-service
+    container_name: travelowkey-payment-service
+    ports:
+      - "3007:3007"
+    environment:
+      NODE_ENV: production
+      PORT: 3007
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: payments
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET}
+      ADYEN_API_KEY: ${ADYEN_API_KEY}
+      ADYEN_MERCHANT_ACCOUNT: ${ADYEN_MERCHANT_ACCOUNT}
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  review-service:
+    build:
+      context: ./services/review-service
+      dockerfile: Dockerfile
+    hostname: review-service
+    container_name: travelowkey-review-service
+    ports:
+      - "3008:3008"
+    environment:
+      NODE_ENV: production
+      PORT: 3008
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/reviews?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_CLOUD_API_KEY: ${GOOGLE_CLOUD_API_KEY}
+      PERSPECTIVE_API_KEY: ${PERSPECTIVE_API_KEY}
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+      - elasticsearch
+    restart: unless-stopped
+
+  # Phase 3 Services - Intelligence & Communication
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    hostname: notification-service
+    container_name: travelowkey-notification-service
+    ports:
+      - "3009:3009"
+    environment:
+      NODE_ENV: production
+      PORT: 3009
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/notifications?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      FIREBASE_SERVER_KEY: ${FIREBASE_SERVER_KEY}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  search-service:
+    build:
+      context: ./services/search-service
+      dockerfile: Dockerfile
+    hostname: search-service
+    container_name: travelowkey-search-service
+    ports:
+      - "3010:3010"
+    environment:
+      NODE_ENV: production
+      PORT: 3010
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/search?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      COHERE_API_KEY: ${COHERE_API_KEY}
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+      - elasticsearch
+    restart: unless-stopped
+
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    hostname: analytics-service
+    container_name: travelowkey-analytics-service
+    ports:
+      - "3011:3011"
+    environment:
+      NODE_ENV: production
+      PORT: 3011
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: analytics
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/analytics?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
+    depends_on:
+      - postgres
+      - mongodb
+      - redis
+      - kafka
+      - elasticsearch
+    restart: unless-stopped
+
+  # Phase 4 Services - Advanced Features
+  loyalty-service:
+    build:
+      context: ./services/loyalty-service
+      dockerfile: Dockerfile
+    hostname: loyalty-service
+    container_name: travelowkey-loyalty-service
+    ports:
+      - "3012:3012"
+    environment:
+      NODE_ENV: production
+      PORT: 3012
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/loyalty?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      POLYGON_RPC_URL: ${POLYGON_RPC_URL}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL}
+      PRIVATE_KEY: ${BLOCKCHAIN_PRIVATE_KEY}
+      IPFS_API_URL: ${IPFS_API_URL}
+      CERAMIC_API_URL: ${CERAMIC_API_URL}
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  insurance-service:
+    build:
+      context: ./services/insurance-service
+      dockerfile: Dockerfile
+    hostname: insurance-service
+    container_name: travelowkey-insurance-service
+    ports:
+      - "3013:3013"
+    environment:
+      NODE_ENV: production
+      PORT: 3013
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: insurance
+      POSTGRES_USER: travelowkey
+      POSTGRES_PASSWORD: travelowkey123
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/insurance?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      CHAINLINK_API_KEY: ${CHAINLINK_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_CLOUD_VISION_API_KEY: ${GOOGLE_CLOUD_VISION_API_KEY}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    depends_on:
+      - postgres
+      - mongodb
+      - redis
+      - kafka
+    restart: unless-stopped
+
+  content-management-service:
+    build:
+      context: ./services/content-management-service
+      dockerfile: Dockerfile
+    hostname: content-management-service
+    container_name: travelowkey-content-management-service
+    ports:
+      - "3014:3014"
+    environment:
+      NODE_ENV: production
+      PORT: 3014
+      MONGODB_URI: mongodb://travelowkey:travelowkey123@mongodb:27017/content?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+      - elasticsearch
+    restart: unless-stopped
+
+  # Additional Infrastructure Services
+  clickhouse:
+    image: yandex/clickhouse-server:23.8
+    hostname: clickhouse
+    container_name: travelowkey-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    hostname: influxdb
+    container_name: travelowkey-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: travelowkey
+      DOCKER_INFLUXDB_INIT_PASSWORD: travelowkey123
+      DOCKER_INFLUXDB_INIT_ORG: travelowkey
+      DOCKER_INFLUXDB_INIT_BUCKET: metrics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: travelowkey-admin-token
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+
+  nginx:
+    image: nginx:1.25-alpine
+    hostname: nginx
+    container_name: travelowkey-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d
+      - ./infrastructure/ssl:/etc/nginx/ssl
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  redis-data:
+  postgres-data:
+  mongodb-data:
+  elasticsearch-data:
+  prometheus-data:
+  grafana-data:
+  clickhouse-data:
+  influxdb-data:
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
